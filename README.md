@@ -18,12 +18,6 @@ This project enables the Raspberry Pi Pico2W to function as a Bluetooth bridge f
 
 ### Get the firmware
 
-You have two options:
-
-- **Download a pre-built `.uf2`** — grab the newest
-  [Releases](../../releases) build (`ds5-bridge-*.uf2`). No tools needed.
-- **Build it yourself** — see [Build Instructions](#build-instructions)
-  below (Windows users get a one-command script).
 
 ### Flashing Firmware
 
