@@ -79,6 +79,10 @@ void config_valid() {
         body->controller_mode = 2;
         printf("[Config] controller_mode is invalid\n");
     }
+    if (body->guide_button_enabled > 1) {
+        body->guide_button_enabled = 1;
+        printf("[Config] guide_button_enabled is invalid, defaulting to enabled\n");
+    }
     if (body->config_version != CONFIG_VERSION) {
         body->config_version = CONFIG_VERSION;
         printf("[Config] Warning: Config may breaking change\n");
