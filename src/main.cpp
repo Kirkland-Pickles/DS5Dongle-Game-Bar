@@ -47,6 +47,7 @@ volatile bool report_dirty = false;
 void interrupt_loop() {
     if (!tud_hid_ready()) return;
 
+    if (get_config().guide_button_enabled) {
     static bool ps_was_pressed = false;
     static uint32_t ps_press_time = 0;
     static bool long_press_fired = false;
@@ -100,7 +101,7 @@ void interrupt_loop() {
     }
 
     interrupt_in_data[9] &= ~0x01;
-
+    }
     if (get_config().polling_rate_mode != 2) {
         if (!tud_hid_report(0x01, interrupt_in_data, 63)) {
             printf("[USBHID] tud_hid_report error\n");
