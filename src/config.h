@@ -17,6 +17,7 @@ struct __attribute__((packed)) Config_body {
     uint8_t polling_rate_mode; // 0: 250Hz, 1: 500Hz, 2: real-time
     uint8_t audio_buffer_length; // [16,128]
     uint8_t controller_mode; // 0: DS5, 1: DSE, 2: Auto
+    uint8_t guide_button_enabled; // bool: 0 disabled, 1 enabled
 };
 
 struct __attribute__((packed)) Config {
