@@ -43,7 +43,6 @@ enum {
     ITF_NUM_AUDIO_STREAMING_OUT,
     ITF_NUM_AUDIO_STREAMING_IN,
     ITF_NUM_HID,
-    ITF_NUM_KEYBOARD,
 #if ENABLE_SERIAL
     ITF_NUM_CDC,
     ITF_NUM_CDC_DATA,
@@ -61,7 +60,6 @@ enum {
 #if ENABLE_SERIAL
         + TUD_CDC_DESC_LEN
 #endif
-        + TUD_HID_DESC_LEN
 };
 
 // String Descriptor Index
@@ -119,11 +117,6 @@ uint8_t const *tud_descriptor_device_cb(void) {
 //--------------------------------------------------------------------+
 // Configuration Descriptor
 //--------------------------------------------------------------------+
-
-uint8_t const desc_keyboard_report[] = {
-    TUD_HID_REPORT_DESC_KEYBOARD()
-};
-
 uint8_t descriptor_configuration[] = {
     // --- CONFIGURATION DESCRIPTOR ---
     0x09, // bLength
@@ -387,9 +380,6 @@ uint8_t descriptor_configuration[] = {
     0x03, // bmAttributes: Interrupt
     0x40, 0x00, // wMaxPacketSize: 64
     0x01, // bInterval: 1 (polling every 4ms -> 1ms)
-
-    // --- KEYBOARD DESCRIPTOR ---
-    TUD_HID_DESCRIPTOR(ITF_NUM_KEYBOARD, 0, HID_ITF_PROTOCOL_KEYBOARD, sizeof(desc_keyboard_report), 0x87, 8, 10),
 
 #if ENABLE_SERIAL
     // --- CDC ACM (USB Serial) ---
@@ -817,9 +807,7 @@ static_assert(sizeof(desc_hid_report_dse) == 0x01B5);
 // Application return pointer to descriptor
 // Descriptor contents must exist long enough for transfer to complete
 uint8_t const *tud_hid_descriptor_report_cb(uint8_t itf) {
-    if (itf == 1) {
-        return desc_keyboard_report;
-    }
+    (void) itf;
     if (ds_mode()) {
         return desc_hid_report_ds;
     }
@@ -867,20 +855,26 @@ uint16_t const *tud_descriptor_string_cb(uint8_t index, uint16_t langid) {
             break;
 
         default:
+            // Note: the 0xEE index string is a Microsoft OS 1.0 Descriptors.
+            // https://docs.microsoft.com/en-us/windows-hardware/drivers/usbcon/microsoft-defined-usb-descriptors
+
             if (!(index < sizeof(string_desc_arr) / sizeof(string_desc_arr[0]))) return NULL;
 
             const char *str = string_desc_arr[index];
 
+            // Cap at max char
             chr_count = strlen(str);
-            size_t const max_count = sizeof(_desc_str) / sizeof(_desc_str[0]) - 1;
+            size_t const max_count = sizeof(_desc_str) / sizeof(_desc_str[0]) - 1; // -1 for string type
             if (chr_count > max_count) chr_count = max_count;
 
+            // Convert ASCII string into UTF-16
             for (size_t i = 0; i < chr_count; i++) {
                 _desc_str[1 + i] = str[i];
             }
             break;
     }
 
+    // first byte is length (including header), second byte is string type
     _desc_str[0] = (uint16_t) ((TUSB_DESC_STRING << 8) | (2 * chr_count + 2));
 
     return _desc_str;
