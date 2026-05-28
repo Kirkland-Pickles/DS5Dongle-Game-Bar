@@ -17,6 +17,7 @@
     standard (default) - normal firmware.
     debug              - adds -DENABLE_SERIAL=ON -DENABLE_VERBOSE=ON.
     wake               - adds -DENABLE_WAKE_HID=ON (Wake-on-PS build).
+    guide              - adds -DENABLE_GUIDE_BUTTON=ON (Guide button to Win+G / Win+Tab build).
 
 .PARAMETER Clean
     Delete the variant's build directory before configuring.
@@ -37,15 +38,15 @@
 
 .EXAMPLE
     # From inside a cloned repo:
-    powershell -ExecutionPolicy Bypass -File tools\build-windows.ps1 -Variant wake
+    powershell -ExecutionPolicy Bypass -File tools\build-windows.ps1 -Variant guide
 
 .EXAMPLE
-    powershell -ExecutionPolicy Bypass -File .\build-windows.ps1 -Repo https://github.com/youruser/DS5Dongle.git -Ref master
+    powershell -ExecutionPolicy Bypass -File .\build-windows.ps1 -Repo https://github.com/awalol/DS5Dongle.git -Ref master
 #>
 
 [CmdletBinding()]
 param(
-    [ValidateSet('standard', 'debug', 'wake')]
+    [ValidateSet('standard', 'debug', 'wake', 'guide')]
     [string]$Variant = 'standard',
     [switch]$Clean,
     # Project to build when this script is run standalone (not from inside a
@@ -59,7 +60,7 @@ $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
 # Bump on every change so a stale download is obvious in the banner.
-$SCRIPT_REV   = '2026-05-16.7'
+$SCRIPT_REV   = '2026-05-28.1'
 
 # --- Pinned versions: keep in sync with .github/workflows/build-firmware.yml ---
 $PICO_SDK_REF = '2.2.0'
@@ -465,6 +466,7 @@ $cmakeArgs = @(
 switch ($Variant) {
     'debug' { $cmakeArgs += @('-DENABLE_SERIAL=ON', '-DENABLE_VERBOSE=ON') }
     'wake'  { $cmakeArgs += @('-DENABLE_WAKE_HID=ON') }
+    'guide' { $cmakeArgs += @('-DENABLE_GUIDE_BUTTON=ON') }
 }
 
 Info "Configuring: cmake $($cmakeArgs -join ' ')"

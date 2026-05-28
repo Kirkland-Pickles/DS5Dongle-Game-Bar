@@ -12,7 +12,6 @@
 #include "hardware/vreg.h"
 #include "hardware/watchdog.h"
 #include "pico/cyw43_arch.h"
-#include "pico/time.h"
 #include "state_mgr.h"
 #if ENABLE_SERIAL
 #include "pico/stdio_usb.h"
@@ -21,6 +20,7 @@
 #include "cmd.h"
 #if ENABLE_BATT_LED
 #include "battery_led.h"
+#include "guide_button.h"
 #endif
 
 // Pico SDK speciifically for waiting on conditions
@@ -47,61 +47,14 @@ volatile bool report_dirty = false;
 void interrupt_loop() {
     if (!tud_hid_ready()) return;
 
+#if ENABLE_GUIDE_BUTTON
     if (get_config().guide_button_enabled) {
-    static bool ps_was_pressed = false;
-    static uint32_t ps_press_time = 0;
-    static bool long_press_fired = false;
-    static bool key_release_pending = false;
-    static uint32_t key_release_time = 0;
-
-    uint32_t current_time = to_ms_since_boot(get_absolute_time());
-    
-    bool raw_ps_pressed = (interrupt_in_data[9] & 0x01);
-    static uint32_t last_high_time = 0;
-    static bool is_ps_pressed = false;
-
-    if (raw_ps_pressed) {
-        is_ps_pressed = true;
-        last_high_time = current_time;
-    } else if (current_time - last_high_time > 50) {
-        is_ps_pressed = false;
+        guide_button_tick(interrupt_in_data);
     }
+#endif
 
-    if (key_release_pending && (current_time >= key_release_time)) {
-        if (tud_hid_n_ready(1)) {
-            tud_hid_n_keyboard_report(1, 0, 0, NULL);
-            key_release_pending = false;
-        }
-    }
+    // TODO: Refactor...
 
-    if (is_ps_pressed && !ps_was_pressed) {
-        ps_press_time = current_time;
-        ps_was_pressed = true;
-        long_press_fired = false;
-    } else if (is_ps_pressed && ps_was_pressed) {
-        if (!long_press_fired && (current_time - ps_press_time >= 750)) {
-            if (tud_hid_n_ready(1)) {
-                uint8_t keycode[6] = {HID_KEY_TAB};
-                tud_hid_n_keyboard_report(1, 0, KEYBOARD_MODIFIER_LEFTGUI, keycode);
-                long_press_fired = true; 
-                key_release_pending = true;
-                key_release_time = current_time + 30; 
-            }
-        }
-    } else if (!is_ps_pressed && ps_was_pressed) {
-        if (!long_press_fired) {
-            if (tud_hid_n_ready(1)) {
-                uint8_t keycode[6] = {HID_KEY_G};
-                tud_hid_n_keyboard_report(1, 0, KEYBOARD_MODIFIER_LEFTGUI, keycode);
-                key_release_pending = true;
-                key_release_time = current_time + 30;
-            }
-        }
-        ps_was_pressed = false;
-    }
-
-    interrupt_in_data[9] &= ~0x01;
-    }    
     // TODO: Refactor for better code reuse
     if (get_config().polling_rate_mode != 2) {
         if (!tud_hid_report(0x01, interrupt_in_data, 63)) {
@@ -111,7 +64,9 @@ void interrupt_loop() {
     }
 
     bool should_send = false;
+    // Local buffer to hold the report data while we prepare it to send. 
     uint8_t safe_report[63];
+
 
     critical_section_enter_blocking(&report_cs);
     if (report_dirty) {
@@ -121,9 +76,13 @@ void interrupt_loop() {
     }
     critical_section_exit(&report_cs);
 
+    // Only send to TinyUSB if we actually grabbed fresh data
     if (should_send) {
         if (!tud_hid_report(0x01, safe_report, 63)) {
             printf("[USBHID] tud_hid_report error\n");
+
+            // If the report failed to queue, restore the dirty flag 
+            // so we try again on the next loop iteration.
             critical_section_enter_blocking(&report_cs);
             report_dirty = true;
             critical_section_exit(&report_cs);
@@ -132,6 +91,7 @@ void interrupt_loop() {
 }
 
 void on_bt_data(CHANNEL_TYPE channel, uint8_t *data, uint16_t len) {
+    // printf("[Main] BT data callback: channel=%u len=%u\n", channel, len);
     if (channel == INTERRUPT && data[1] == 0x31) {
         if ((data[56] & 1) != (interrupt_in_data[53] & 1)) {
             set_headset(data[56] & 1);
@@ -145,6 +105,12 @@ void on_bt_data(CHANNEL_TYPE channel, uint8_t *data, uint16_t len) {
             return;
         }
 
+        // We add the critical section here to avoid any race conditions when writing to the interrupt_in_data buffer,
+        // which is shared between the main loop and this callback. 
+        // The critical section ensures that only one thread can access the buffer at a time, 
+        // preventing data corruption and ensuring thread safety.   
+        // We also set the report_dirty flag to true to indicate that new data is available
+        //  and needs to be sent in the next interrupt report.
         critical_section_enter_blocking(&report_cs);
         memcpy(interrupt_in_data, data + 3, 63);
         report_dirty = true;
@@ -156,6 +122,8 @@ void on_bt_data(CHANNEL_TYPE channel, uint8_t *data, uint16_t len) {
 }
 
 // Invoked when received GET_REPORT control request
+// Application must fill buffer report's content and return its length.
+// Return zero will cause the stack to STALL request
 uint16_t tud_hid_get_report_cb(uint8_t itf, uint8_t report_id, hid_report_type_t report_type, uint8_t *buffer,
                                uint16_t reqlen) {
     (void) itf;
@@ -178,8 +146,8 @@ uint16_t tud_hid_get_report_cb(uint8_t itf, uint8_t report_id, hid_report_type_t
 
 bool tud_audio_set_itf_cb(uint8_t rhport, tusb_control_request_t const *p_request) {
     (void) rhport;
-    uint8_t const itf = tu_u16_low(p_request->wIndex);
-    uint8_t const alt = tu_u16_low(p_request->wValue);
+    uint8_t const itf = tu_u16_low(p_request->wIndex); // wInterface
+    uint8_t const alt = tu_u16_low(p_request->wValue); // bAlternateSetting
 
     if (itf == 1) {
         printf("[AUDIO] Set interface Speaker to alternate setting %d\n", alt);
@@ -205,6 +173,7 @@ void tud_hid_set_report_cb(uint8_t itf, uint8_t report_id, hid_report_type_t rep
         return;
     }
 
+    // INTERRUPT OUT
     if (report_id == 0) {
         switch (buffer[0]) {
             case 0x02: {
@@ -219,13 +188,15 @@ void tud_hid_set_report_cb(uint8_t itf, uint8_t report_id, hid_report_type_t rep
                     reportSeqCounter = 0;
                 }
                 outputData[2] = 0x10;
-                state_set(outputData + 3, sizeof(SetStateData));
+                // memcpy(outputData + 3, buffer + 1, bufsize - 1);
+                state_set(outputData + 3,sizeof(SetStateData));
                 bt_write(outputData, sizeof(outputData));
                 break;
             }
         }
     }
     if (report_id == 0x80 ||
+        // DSE: Write Profile Block
         report_id == 0x60 ||
         report_id == 0x62 ||
         report_id == 0x61) {
@@ -266,6 +237,7 @@ int main() {
 #if !ENABLE_SERIAL
     if (watchdog_caused_reboot()) {
         printf("Rebooted by Watchdog!\n");
+        // 当崩溃重启以后，闪三下灯
         for (int i = 0; i < 6; i++) {
             if (i % 2 == 0) {
                 cyw43_arch_gpio_put(CYW43_WL_GPIO_LED_PIN, true);
@@ -279,6 +251,7 @@ int main() {
     }
 #endif
 
+    // Initialize the critical section for the report buffer
     critical_section_init(&report_cs);
 
     config_load();

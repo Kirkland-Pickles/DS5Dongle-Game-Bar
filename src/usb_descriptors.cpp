@@ -43,7 +43,9 @@ enum {
     ITF_NUM_AUDIO_STREAMING_OUT,
     ITF_NUM_AUDIO_STREAMING_IN,
     ITF_NUM_HID,
-    ITF_NUM_KEYBOARD,
+#if ENABLE_GUIDE_BUTTON
+    ITF_NUM_HID_KBD,
+#endif
 #if ENABLE_SERIAL
     ITF_NUM_CDC,
     ITF_NUM_CDC_DATA,
@@ -58,10 +60,12 @@ enum {
 #endif
     CONFIG_DESC_LEN_BASE = 0x00E3 + CONFIG_DESC_LEN_AUDIO_IAD,
     CONFIG_DESC_LEN_TOTAL = CONFIG_DESC_LEN_BASE
+#if ENABLE_GUIDE_BUTTON
+        + TUD_HID_DESC_LEN
+#endif
 #if ENABLE_SERIAL
         + TUD_CDC_DESC_LEN
 #endif
-        + TUD_HID_DESC_LEN
 };
 
 // String Descriptor Index
@@ -120,9 +124,11 @@ uint8_t const *tud_descriptor_device_cb(void) {
 // Configuration Descriptor
 //--------------------------------------------------------------------+
 
+#if ENABLE_GUIDE_BUTTON
 uint8_t const desc_keyboard_report[] = {
     TUD_HID_REPORT_DESC_KEYBOARD()
 };
+#endif
 
 uint8_t descriptor_configuration[] = {
     // --- CONFIGURATION DESCRIPTOR ---
@@ -134,6 +140,7 @@ uint8_t descriptor_configuration[] = {
     0x00, // iConfiguration: 0
     0xC0, // bmAttributes: SELF-POWERED, NO REMOTE-WAKEUP
     0xFA, // bMaxPower: 500mA (250 * 2mA)
+
 
 #if ENABLE_SERIAL
     // --- INTERFACE ASSOCIATION DESCRIPTOR: Audio function (interfaces 0-2) ---
@@ -388,8 +395,11 @@ uint8_t descriptor_configuration[] = {
     0x40, 0x00, // wMaxPacketSize: 64
     0x01, // bInterval: 1 (polling every 4ms -> 1ms)
 
-    // --- KEYBOARD DESCRIPTOR ---
-    TUD_HID_DESCRIPTOR(ITF_NUM_KEYBOARD, 0, HID_ITF_PROTOCOL_KEYBOARD, sizeof(desc_keyboard_report), 0x87, 8, 10),
+#if ENABLE_GUIDE_BUTTON
+    // --- INTERFACE DESCRIPTOR: HID Keyboard ---
+    // Using 0x87 to avoid collision with Gamepad (0x84) and CDC (0x85, 0x86)
+    TUD_HID_DESCRIPTOR(ITF_NUM_HID_KBD, 0, HID_ITF_PROTOCOL_KEYBOARD, sizeof(desc_keyboard_report), 0x87, 0x40, 1),
+#endif
 
 #if ENABLE_SERIAL
     // --- CDC ACM (USB Serial) ---
@@ -817,12 +827,10 @@ static_assert(sizeof(desc_hid_report_dse) == 0x01B5);
 // Application return pointer to descriptor
 // Descriptor contents must exist long enough for transfer to complete
 uint8_t const *tud_hid_descriptor_report_cb(uint8_t itf) {
-    if (itf == 1) {
-        return desc_keyboard_report;
-    }
-    if (ds_mode()) {
-        return desc_hid_report_ds;
-    }
+#if ENABLE_GUIDE_BUTTON
+    if (itf == 1) return desc_keyboard_report;
+#endif
+    if (ds_mode()) return desc_hid_report_ds;
     return desc_hid_report_dse;
 }
 
